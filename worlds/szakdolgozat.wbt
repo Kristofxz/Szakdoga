@@ -2,22 +2,35 @@
 
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/sphero/bb8/protos/BB-8.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/adept/pioneer3/protos/Pioneer3dx.proto"
 
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.1132378079861533 0.10771524446635627 0.9877118127024928 1.6331442072299514
-  position 1.5265642001706874 -5.631151038124297 2.279094954931819
+  orientation -0.20706442159198044 0.1304770897735621 0.9695875692040408 2.0447213375547513
+  position 4.384585103322945 -5.605200953446486 3.7495425284454473
 }
 TexturedBackground {
+  luminosity 0.5
 }
 TexturedBackgroundLight {
+  luminosity 0.5
 }
 Robot {
+  children [
+    Emitter {
+    }
+  ]
   name "supervisor"
   controller "supervisor_controller"
   supervisor TRUE
 }
-DEF BB8 BB-8 {
+DEF ROBOT Pioneer3dx {
+  name "ROBOT"
+  controller "bb8_controller"
+  extensionSlot [
+    Receiver {
+      name "rx0"
+    }
+  ]
 }

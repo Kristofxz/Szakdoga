@@ -1,220 +1,88 @@
 from controller import Supervisor
 import random
+import math
 
 TIME_STEP = 32
-WIDTH = 10
-HEIGHT = 10
-MINES_COUNT = 15
-TILE_SIZE = 1
-
 robot = Supervisor()
+root_children = robot.getRoot().getField("children")
+# FIGYELEM: Most már ROBOT néven keressük a Pioneer-t!
+robot_node = robot.getFromDef("ROBOT") 
+emitter = robot.getDevice("emitter")
 
-root_node = robot.getRoot()
-root_children_field = root_node.getField("children")
+def generate_map():
+    grid = [[0 for _ in range(10)] for _ in range(10)]
+    safe = set()
+    cx, cy = 0, 0
+    safe.add((cx, cy))
+    while cx < 9 or cy < 9:
+        if cx < 9 and (cy == 9 or random.random() < 0.5): cx += 1
+        else: cy += 1
+        safe.add((cx, cy))
+    cells = [(x, y) for x in range(10) for y in range(10) if (x, y) not in safe]
+    random.shuffle(cells)
+    for i in range(min(15, len(cells))):
+        x, y = cells[i]; grid[x][y] = 1
+    return grid
 
-robot_node = robot.getFromDef("BB8")
-
-#Pálya generálása
-def generate_map(height, width, mines):
-    grid = [[0 for col in range(height)] for row in range(width)]
-
-    safe_path = set()
-    curr_x, curr_y = 0, 0
-    safe_path.add((curr_x, curr_y))
-
-    while curr_x < width - 1 or curr_y < height - 1:
-        can_move_right = curr_x < width - 1
-        can_move_up = curr_y < height - 1
-
-        if can_move_right and (not can_move_up or random.random() < 0.5):
-            curr_x += 1
-        else:
-            curr_y += 1
-
-        safe_path.add((curr_x, curr_y))
-
-    all_cells = [(x, y) for x in range(width) for y in range(height)]
-    random.shuffle(all_cells)
-
-    placed = 0
-    for x, y in all_cells:
-        if placed >= mines:
-            break
-        if (x, y) not in safe_path:
-            grid[x][y] = 1
-            placed += 1
-
-    return grid, safe_path
+def spawn_everything(grid):
+    for i in range(root_children.getCount()-1, -1, -1):
+        def_name = root_children.getMFNode(i).getDef()
+        if def_name in ["ARENA", "TILE_GROUP"]: root_children.removeMF(i)
     
-def spawn_tiles(grid):
-    group_string = "DEF TILE_GROUP Group { children [] }"
-    root_children_field.importMFNodeFromString(-1, group_string)
-    
-    tile_group_node = robot.getFromDef("TILE_GROUP")
-    group_children_field = tile_group_node.getField("children")
-    
-    for x in range(WIDTH):
-        for y in range(HEIGHT):
-            tile_string = f"""
-            Pose {{
-              translation {x * TILE_SIZE} {y * TILE_SIZE} 0.005
-              children [
-                DEF TILE_{x}_{y} Solid {{
-                  translation 0 0 0
-                  children [
-                    Shape {{
-                      appearance PBRAppearance {{
-                        baseColor 0.8 0.8 0.8
-                        roughness 1
-                      }}
-                      geometry DEF TILE_GEOM Box {{
-                        size {TILE_SIZE * 0.95} {TILE_SIZE * 0.95} 0.01
-                      }}
-                    }}
-                  ]
-                  boundingObject USE TILE_GEOM
-                }}
-              ]
-            }}
-            """
-            group_children_field.importMFNodeFromString(-1, tile_string)
-
-def spawn_floor():
-    arena_width = WIDTH * TILE_SIZE
-    arena_height = HEIGHT * TILE_SIZE
-    wall_thickness = 0.05
-    wall_height = 0.2 
-
-    center_x = (arena_width / 2) - (TILE_SIZE / 2)
-    center_y = (arena_height / 2) - (TILE_SIZE / 2)
-
-    arena_string = f"""
-    DEF ARENA Pose {{
-      translation {center_x} {center_y} 0
+    robot.step(TIME_STEP)
+    arena_s = f"""
+    DEF ARENA Group {{
       children [
-
-        Solid {{
-          children [
-            Shape {{
-              appearance PBRAppearance {{ baseColor 0.1 0.1 0.1 roughness 1 }}
-              geometry DEF GROUND_GEOM Box {{ size {arena_width} {arena_height} 0.001 }}
-            }}
-          ]
-          boundingObject USE GROUND_GEOM
-        }}
-        
-        Solid {{
-          translation 0 {-arena_height/2 - wall_thickness/2} {wall_height/2}
-          children [ 
-            DEF WALL_SHAPE Shape {{
-              appearance PBRAppearance {{ baseColor 0.5 0.5 0.5 }}
-              geometry DEF WALL_GEOM Box {{ size {arena_width + 2*wall_thickness} {wall_thickness} {wall_height} }}
-            }} 
-          ]
-          boundingObject USE WALL_GEOM
-        }}
-        Solid {{
-          translation 0 {arena_height/2 + wall_thickness/2} {wall_height/2}
-          children [ USE WALL_SHAPE ]
-          boundingObject USE WALL_GEOM
-        }}
-        Solid {{
-          translation {-arena_width/2 - wall_thickness/2} 0 {wall_height/2}
-          children [ 
-            DEF SIDE_WALL_SHAPE Shape {{
-              appearance PBRAppearance {{ baseColor 0.5 0.5 0.5 }}
-              geometry DEF SIDE_WALL_GEOM Box {{ size {wall_thickness} {arena_height} {wall_height} }}
-            }} 
-          ]
-          boundingObject USE SIDE_WALL_GEOM
-        }}
-        Solid {{
-          translation {arena_width/2 + wall_thickness/2} 0 {wall_height/2}
-          children [ USE SIDE_WALL_SHAPE ]
-          boundingObject USE SIDE_WALL_GEOM
-        }}
+        Solid {{ translation 4.5 4.5 -0.05 children [ Shape {{ appearance PBRAppearance {{ baseColor 0.1 0.1 0.1 roughness 1.0 }} geometry Box {{ size 10.5 10.5 0.1 }} }} ] boundingObject Box {{ size 10.5 10.5 0.1 }} }}
+        Solid {{ translation 4.5 -0.75 0.1 children [ Shape {{ appearance PBRAppearance {{ baseColor 0.4 0.4 0.4 }} geometry Box {{ size 11 0.1 0.5 }} }} ] boundingObject Box {{ size 11 0.1 0.5 }} }}
+        Solid {{ translation 4.5 9.75 0.1 children [ Shape {{ appearance PBRAppearance {{ baseColor 0.4 0.4 0.4 }} geometry Box {{ size 11 0.1 0.5 }} }} ] boundingObject Box {{ size 11 0.1 0.5 }} }}
+        Solid {{ translation -0.75 4.5 0.1 children [ Shape {{ appearance PBRAppearance {{ baseColor 0.4 0.4 0.4 }} geometry Box {{ size 0.1 11 0.5 }} }} ] boundingObject Box {{ size 0.1 11 0.5 }} }}
+        Solid {{ translation 9.75 4.5 0.1 children [ Shape {{ appearance PBRAppearance {{ baseColor 0.4 0.4 0.4 }} geometry Box {{ size 0.1 11 0.5 }} }} ] boundingObject Box {{ size 0.1 11 0.5 }} }}
       ]
     }}
     """
-    root_children_field.importMFNodeFromString(-1, arena_string)
-
-
-def count_neighbors(grid, x, y):
-    count = 0
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            if dx == 0 and dy == 0: continue
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < WIDTH and 0 <= ny < HEIGHT:
-                if grid[nx][ny] == 1:
-                    count += 1
-    return count
-
-
-def flood_fill_reveal(x, y, grid, revealed):
-    if not (0 <= x < WIDTH and 0 <= y < HEIGHT) or revealed[x][y]:
-        return
-
-    revealed[x][y] = True
+    root_children.importMFNodeFromString(-1, arena_s)
+    robot.step(TIME_STEP)
+    root_children.importMFNodeFromString(-1, "DEF TILE_GROUP Group { children [] }")
+    robot.step(TIME_STEP)
+    tile_group = robot.getFromDef("TILE_GROUP").getField("children")
     
-    if count_neighbors(grid, x, y) > 0:
-        return
+    for x in range(10):
+        for y in range(10):
+            c = "0.7 0.7 0.7" if grid[x][y] == 0 else "0.8 0.1 0.1"
+            t = f"Pose {{ translation {x} {y} 0.002 children [ Shape {{ appearance PBRAppearance {{ baseColor {c} roughness 1.0 }} geometry Plane {{ size 0.95 0.95 }} }} ] }}"
+            tile_group.importMFNodeFromString(-1, t)
 
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            if dx == 0 and dy == 0: continue
-            flood_fill_reveal(x + dx, y + dy, grid, revealed)
-
-
-def print_board(grid, revealed, safe_path):
-    print("\n--- AKNAKERESŐ TESZT ---")
-    for y in reversed(range(HEIGHT)):
-        row_str = ""
-        for x in range(WIDTH):
-            if not revealed[x][y]:
-                row_str += "[]"  
-            elif grid[x][y] == 1:
-                row_str += "X "  
-            else:
-                c = count_neighbors(grid, x, y)
-                row_str += ". " if c == 0 else f"{c} "
-        print(row_str)
-
-
-
-#csak teszteleshez
-my_map, path = generate_map(HEIGHT,WIDTH,MINES_COUNT)
-game_grid, path = generate_map(WIDTH, HEIGHT, MINES_COUNT)
-revealed_map = [[False for _ in range(HEIGHT)] for _ in range(WIDTH)]
-goal_pos = (WIDTH - 1, HEIGHT - 1)
-flood_fill_reveal(0, 0, game_grid, revealed_map)
-spawn_floor()
-spawn_tiles(game_grid)
-last_pos = (-1, -1)
-
-playing = True
-
+game_grid = generate_map()
+spawn_everything(game_grid)
 
 while robot.step(TIME_STEP) != -1:
-        
     if robot_node:
         pos = robot_node.getPosition()
+        rot = robot_node.getOrientation()
+        px, py = pos[0], pos[1]
+        
+        # A Pioneer 3-DX abszolút Z-tengely körüli elfordulása (Yaw)
+        yaw_angle = math.atan2(rot[3], rot[0])
+        
+        # 1. Alapértelmezett távolságok a pálya 4 faláig
+        dist_E = 9.5 - px  # Kelet (0 rad)
+        dist_N = 9.5 - py  # Észak (pi/2 rad)
+        dist_W = px - (-0.5) # Nyugat (pi rad)
+        dist_S = py - (-0.5) # Dél (-pi/2 rad)
+        
+        # 2. Akna védelem
+        for x in range(10):
+            for y in range(10):
+                if game_grid[x][y] == 1:
+                    if abs(y - py) < 0.5:
+                        if x > px: dist_E = min(dist_E, x - px - 0.5)
+                        elif x < px: dist_W = min(dist_W, px - x - 0.5)
+                    if abs(x - px) < 0.5:
+                        if y > py: dist_N = min(dist_N, y - py - 0.5)
+                        elif y < py: dist_S = min(dist_S, py - y - 0.5)
 
-        curr_x = int(round(pos[0] / TILE_SIZE))
-        curr_y = int(round(pos[1] / TILE_SIZE))
-
-        if 0 <= curr_x < WIDTH and 0 <= curr_y < HEIGHT:
-            if (curr_x, curr_y) != last_pos:
-                last_pos = (curr_x, curr_y)
-                
-                if not revealed_map[curr_x][curr_y]:
-                    if game_grid[curr_x][curr_y] == 1:
-                        revealed_map[curr_x][curr_y] = True
-                    else:
-                        flood_fill_reveal(curr_x, curr_y, game_grid, revealed_map)
-                    
-                    print_board(game_grid, revealed_map, goal_pos)
-
-
-    pass
-
+        if emitter:
+            # 4 irány távolsága | GPS X | GPS Y | Iránytű
+            msg = f"{dist_E:.2f}|{dist_N:.2f}|{dist_W:.2f}|{dist_S:.2f}|{px:.2f}|{py:.2f}|{yaw_angle:.2f}"
+            emitter.send(msg.encode('utf-8'))
