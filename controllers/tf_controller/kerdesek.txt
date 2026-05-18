@@ -1,0 +1,10 @@
+milyen adatbazis alapjan lett feltanitva
+hogyan lett letrehozva az adatbazis
+neuralis halo strukturaja
+miert valtogatja az ai es a random dontest
+
+stable_baselines3
+sb3_contrib - TRPO
+PPO
+
+heurisztikus algoritmus

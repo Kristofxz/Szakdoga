@@ -4,126 +4,245 @@ import math
 robot = Robot()
 timestep = int(robot.getBasicTimeStep())
 
-# A Pioneer 3-DX motorjai
 left_motor = robot.getDevice('left wheel')
 right_motor = robot.getDevice('right wheel')
 rx = robot.getDevice('rx0')
+if rx: rx.enable(timestep)
 
-if rx:
-    rx.enable(timestep)
-else:
-    print("HIBA: Nem találtam 'rx0' Receivert a roboton!")
+left_motor.setPosition(0.0)
+right_motor.setPosition(0.0)
+left_motor.setVelocity(0.0)
+right_motor.setVelocity(0.0)
 
-for m in [left_motor, right_motor]:
-    m.setPosition(float('inf'))
-    m.setVelocity(0.0)
+WHEEL_RADIUS = 0.0975
+AXLE_LENGTH = 0.33 
 
+STATE_INIT_SCAN = "INIT_SCAN"
+STATE_SCAN_TURN = "SCAN_TURN"
+STATE_SCAN_READ = "SCAN_READ"
 STATE_DECIDE = "DECIDE"
-STATE_TURN = "TURN"
+STATE_MOVE_TURN = "MOVE_TURN"
 STATE_MOVE = "MOVE"
 
-current_state = STATE_DECIDE
-target_yaw = 0.0
-target_gx, target_gy = 0.0, 0.0
+current_state = STATE_INIT_SCAN
+timer = 0
+scan_directions = [0.0, math.pi/2, math.pi, -math.pi/2]
+dir_names = ["Kelet", "Észak", "Nyugat", "Dél"]
+current_scan_index = 0
+scan_results = {}
+target_yaw, target_gx, target_gy = 0.0, 0, 0
 
-print("🚀 Pioneer 3-DX Rendszer Inicializálva. Várakozás a radar adatokra...")
+sig_E, sig_N, sig_W, sig_S = 0.0, 0.0, 0.0, 0.0
+curr_x, curr_y, current_yaw = 0.0, 0.0, 0.0
+has_data = False 
 
-# Hozzáadunk egy memóriát az utolsó ismert adatokhoz, hogy ne vesszenek el!
-last_dist_E, last_dist_N, last_dist_W, last_dist_S = 0.0, 0.0, 0.0, 0.0
-last_curr_x, last_curr_y, last_current_yaw = 0.0, 0.0, 0.0
+heatmap_grid = [[-1.0 for _ in range(10)] for _ in range(10)]
+visited_tiles = set() 
+robot_known_walls = set() # --- BŐVÍTÉS: A robot belső memóriája az általa talált falakról ---
+
+def print_heatmap(rx_int, ry_int):
+    print("\n" + "="*34)
+    print("      AKNA HŐTÉRKÉP")
+    print("="*34)
+    for y in range(9, -1, -1):
+        row_str = ""
+        for x in range(10):
+            val = heatmap_grid[x][y]
+            if x == rx_int and y == ry_int:
+                row_str += "[ R] " 
+            elif val == -1:
+                row_str += " ..  " 
+            else:
+                row_str += f"{val:02.0f}  " 
+        print(row_str)
+    print("="*34 + "\n(Falak a terminalban nem latszanak, de a robot kerulgeti oket!)")
+
+def show_graphical_heatmap(rx_int, ry_int, title="Akna heatmap"):
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        plot_data = np.array(heatmap_grid).T 
+        plt.figure(figsize=(8, 8))
+        plt.imshow(plot_data, origin='lower', cmap='hot', interpolation='nearest', vmin=-1)
+        
+        for y in range(10):
+            for x in range(10):
+                val = plot_data[y, x]
+                if x == rx_int and y == ry_int:
+                    text_val = "☠️" if "BUMM" in title else "🤖"
+                else:
+                    text_val = "X" if val == -1 else f"{val:.0f}"
+                color = "white" if val > 3 else "black"
+                plt.text(x, y, text_val, ha="center", va="center", color=color, fontsize=12, fontweight='bold')
+        
+        # --- BŐVÍTÉS: A robot által felfedezett vékony falak berajzolása kék vonallal ---
+        for (p1, p2) in robot_known_walls:
+            wx = (p1[0] + p2[0]) / 2.0
+            wy = (p1[1] + p2[1]) / 2.0
+            if p1[0] != p2[0]: # Függőleges vonal rajzolása
+                plt.plot([wx, wx], [wy - 0.5, wy + 0.5], color='#00aaff', linewidth=5)
+            else: # Vízszintes vonal rajzolása
+                plt.plot([wx - 0.5, wx + 0.5], [wy, wy], color='#00aaff', linewidth=5)
+
+        plt.colorbar(label='Jelerősség')
+        plt.title(title)
+        plt.xlabel('X ')
+        plt.ylabel('Y')
+        plt.xticks(range(10))
+        plt.yticks(range(10))
+        
+        filename = "szakdoga_heatmap_lose.png" if "BUMM" in title else "szakdoga_heatmap_win.png"
+        plt.savefig(filename)
+        print(f"\nKép sikeresen elmentve '{filename}' néven a projekt mappájába!")
+        plt.show(block=True)
+    except ImportError:
+        print("\nMatplotlib nem található, a grafikus hőtérkép nem jelenik meg.")
+
+def move_wheels(left_rad, right_rad, speed=2.0):
+    left_motor.setVelocity(speed)
+    right_motor.setVelocity(speed)
+    left_motor.setPosition(left_motor.getTargetPosition() + left_rad)
+    right_motor.setPosition(right_motor.getTargetPosition() + right_rad)
 
 while robot.step(timestep) != -1:
-    packet_received = False
-    
-    # Adatok olvasása és a memória frissítése
     while rx and rx.getQueueLength() > 0:
-        data = rx.getString().split('|')
-        last_dist_E, last_dist_N = float(data[0]), float(data[1])
-        last_dist_W, last_dist_S = float(data[2]), float(data[3])
-        last_curr_x, last_curr_y = float(data[4]), float(data[5])
-        last_current_yaw = float(data[6])
-        rx.nextPacket()
-        packet_received = True
-
-    # NAGYON FONTOS: Ha még SOHA nem kaptunk adatot, várunk!
-    if last_dist_E == 0.0 and last_dist_N == 0.0 and last_dist_W == 0.0 and last_dist_S == 0.0:
-        continue
-
-    # A könnyebbség kedvéért átadjuk az aktuális értékeket a rövidebb változóknak
-    dist_E, dist_N, dist_W, dist_S = last_dist_E, last_dist_N, last_dist_W, last_dist_S
-    curr_x, curr_y, current_yaw = last_curr_x, last_curr_y, last_current_yaw
-
-    if round(curr_x) == 9 and round(curr_y) == 9:
-        print("🎉 CÉL ELÉRVE! (9,9) 🎉")
-        left_motor.setVelocity(0.0)
-        right_motor.setVelocity(0.0)
-        break
-
-    # --- 1. DÖNTÉS ---
-    if current_state == STATE_DECIDE:
-        left_motor.setVelocity(0.0)
-        right_motor.setVelocity(0.0)
+        data_str = rx.getString()
+        data = data_str.split('|')
         
-        # Lehetséges irányok: Szög, Távolság, X-lépés, Y-lépés, Név
-        dirs = [
-            (0.0, dist_E, 1, 0, "Kelet"),
-            (math.pi/2, dist_N, 0, 1, "Észak"),
-            (math.pi, dist_W, -1, 0, "Nyugat"),
-            (-math.pi/2, dist_S, 0, -1, "Dél")
-        ]
-        
-        # Sorba rakjuk aszerint, melyik visz közelebb a (9,9)-hez
-        dirs.sort(key=lambda d: (9 - (round(curr_x) + d[2]))**2 + (9 - (round(curr_y) + d[3]))**2)
-        
-        chosen_dir = None
-        for d in dirs:
-            if d[1] > 0.8: # Ha szabad az út
-                chosen_dir = d
-                break
-                
-        if chosen_dir:
-            target_yaw = chosen_dir[0]
-            target_gx = round(curr_x) + chosen_dir[2]
-            target_gy = round(curr_y) + chosen_dir[3]
-            print(f"Mező: ({round(curr_x)}, {round(curr_y)}) -> Fordulás {chosen_dir[4]} felé, cél: ({target_gx}, {target_gy})")
-            current_state = STATE_TURN
-        else:
-            print("CSAPDA! Nincs szabad útvonal.")
-            break
-
-    # --- 2. TÖKÉLETES FORGÁS HELYBEN ---
-    elif current_state == STATE_TURN:
-        error = target_yaw - current_yaw
-        while error > math.pi: error -= 2*math.pi
-        while error < -math.pi: error += 2*math.pi
-        
-        # P-szabályozó a forgáshoz (bal kerék hátra, jobb kerék előre)
-        turn_speed = max(-3.0, min(3.0, error * 2.0))
-        left_motor.setVelocity(-turn_speed)
-        right_motor.setVelocity(turn_speed)
-        
-        # Ha a szöghiba kisebb, mint 1 fok (0.02 radián)
-        if abs(error) < 0.02:
+        if data[0] == "BOOM":
             left_motor.setVelocity(0.0)
             right_motor.setVelocity(0.0)
-            current_state = STATE_MOVE
+            death_x, death_y = int(round(float(data[1]))), int(round(float(data[2])))
+            print("\nRáléptél egy aknára!")
+            
+            print_heatmap(death_x, death_y)
+            show_graphical_heatmap(death_x, death_y, title="A robot felrobbant!")
+            break
 
-    # --- 3. EGYENES GURULÁS A CSEMPÉRE ---
-    elif current_state == STATE_MOVE:
-        # Menet közben is korrigáljuk az egyenest, mint a sávtartó automatika
-        error = target_yaw - current_yaw
+        if len(data) >= 7:
+            sig_E = float(data[0])
+            sig_N = float(data[1])
+            sig_W = float(data[2])
+            sig_S = float(data[3])
+            curr_x = float(data[4])
+            curr_y = float(data[5])
+            current_yaw = float(data[6])
+            has_data = True 
+        rx.nextPacket()
+
+    if 'data_str' in locals() and data_str.startswith("BOOM"):
+        break
+
+    if not has_data: continue 
+
+    rx_int, ry_int = round(curr_x), round(curr_y)
+    if rx_int > 9: rx_int = 9
+    if rx_int < 0: rx_int = 0
+    if ry_int > 9: ry_int = 9
+    if ry_int < 0: ry_int = 0
+
+    if rx_int >= 9 and ry_int >= 9:
+        left_motor.setVelocity(0.0); right_motor.setVelocity(0.0)
+        print("CÉL ELÉRVE!")
+        print_heatmap(rx_int, ry_int)
+        show_graphical_heatmap(rx_int, ry_int, title="Túlélte a robot.")
+        break
+
+    if current_state == STATE_INIT_SCAN:
+        visited_tiles.add((rx_int, ry_int))
+        heatmap_grid[rx_int][ry_int] = 0.0
+        
+        scan_results.clear()
+        current_scan_index = 0
+        current_state = STATE_SCAN_TURN
+
+    elif current_state == STATE_SCAN_TURN:
+        target_angle = scan_directions[current_scan_index]
+        error = target_angle - current_yaw
         while error > math.pi: error -= 2*math.pi
         while error < -math.pi: error += 2*math.pi
         
-        base_speed = 5.0
-        correction = error * 2.0
+        wheel_turn = (error * (AXLE_LENGTH / 2.0)) / WHEEL_RADIUS
+        move_wheels(-wheel_turn, wheel_turn, speed=1.5)
+        current_state = STATE_SCAN_READ
+        timer = 0
+
+    elif current_state == STATE_SCAN_READ:
+        timer += 1
+        if timer > 70: 
+            if current_scan_index == 0: current_signal = sig_E
+            elif current_scan_index == 1: current_signal = sig_N
+            elif current_scan_index == 2: current_signal = sig_W
+            else: current_signal = sig_S
+            
+            scan_results[scan_directions[current_scan_index]] = current_signal
+            
+            current_scan_index += 1
+            if current_scan_index < 4:
+                current_state = STATE_SCAN_TURN
+            else:
+                for angle, signal in scan_results.items():
+                    nx = int(round(curr_x + math.cos(angle)))
+                    ny = int(round(curr_y + math.sin(angle)))
+                    if 0 <= nx <= 9 and 0 <= ny <= 9:
+                        # --- BŐVÍTÉS: Fal felismerése és térképezése ---
+                        if signal > 900.0:
+                            robot_known_walls.add(((rx_int, ry_int), (nx, ny)))
+                            robot_known_walls.add(((nx, ny), (rx_int, ry_int)))
+                        elif (nx, ny) not in visited_tiles:
+                            current_val = heatmap_grid[nx][ny]
+                            heatmap_grid[nx][ny] = signal if current_val == -1 else max(current_val, signal)
+                            
+                print_heatmap(rx_int, ry_int)
+                current_state = STATE_DECIDE 
+
+    elif current_state == STATE_DECIDE:
+        best_score = 99999
+        chosen_yaw = None
         
-        # Ha picit sodródna, a kerekek differenciálisan visszahúzzák egyenesbe
-        left_motor.setVelocity(max(-5.2, min(5.2, base_speed - correction)))
-        right_motor.setVelocity(max(-5.2, min(5.2, base_speed + correction)))
+        for angle, signal in scan_results.items():
+            nx = int(round(curr_x + math.cos(angle)))
+            ny = int(round(curr_y + math.sin(angle)))
+            
+            if 0 <= nx <= 9 and 0 <= ny <= 9:
+                if signal < 10.0: # A fal (999.0) miatt nem fog arrafelé menni
+                    d_goal = math.sqrt((9 - nx)**2 + (9 - ny)**2)
+                    visited_penalty = 50.0 if (nx, ny) in visited_tiles else 0.0
+                    score = (signal * 5.0) + d_goal + visited_penalty
+                    
+                    if score < best_score:
+                        best_score, chosen_yaw, target_gx, target_gy = score, angle, nx, ny
         
-        # Ha beértünk a célpont (csempe közepe) 10 centis sugarába
-        dist_to_center = math.sqrt((curr_x - target_gx)**2 + (curr_y - target_gy)**2)
-        if dist_to_center < 0.1:
-            print("Csempe közepe elérve. Megállás és újratervezés.")
-            current_state = STATE_DECIDE
+        if chosen_yaw is not None:
+            target_yaw = math.atan2(target_gy - curr_y, target_gx - curr_x)
+            current_state = STATE_MOVE_TURN
+        else:
+            print("Teljesen beszorultam, nincs hova lépni!")
+            current_state = STATE_INIT_SCAN
+
+    elif current_state == STATE_MOVE_TURN:
+        error = target_yaw - current_yaw
+        while error > math.pi: error -= 2*math.pi
+        while error < -math.pi: error += 2*math.pi
+        wheel_turn = (error * (AXLE_LENGTH / 2.0)) / WHEEL_RADIUS
+        move_wheels(-wheel_turn, wheel_turn, speed=1.5)
+        current_state = "STATE_WAIT_MOVE_TURN"
+        timer = 0
+
+    elif current_state == "STATE_WAIT_MOVE_TURN":
+        timer += 1
+        if timer > 115: 
+            current_state = STATE_MOVE
+            timer = 0
+
+    elif current_state == STATE_MOVE:
+        timer += 1
+        if timer == 1:
+            dist_to_go = math.sqrt((curr_x - target_gx)**2 + (curr_y - target_gy)**2)
+            dist_to_go = min(1.1, dist_to_go)
+            wheel_forward = dist_to_go / WHEEL_RADIUS
+            move_wheels(wheel_forward, wheel_forward, speed=3.0)
+        
+        if timer > 120:
+            current_state = STATE_INIT_SCAN
