@@ -10,8 +10,18 @@ right_motor = robot.getDevice('right wheel')
 rx = robot.getDevice('rx0')
 if rx: rx.enable(timestep)
 
-left_motor.setPosition(0.0)
-right_motor.setPosition(0.0)
+left_ps = left_motor.getPositionSensor()
+right_ps = right_motor.getPositionSensor()
+if left_ps: left_ps.enable(timestep)
+if right_ps: right_ps.enable(timestep)
+
+for _ in range(2): robot.step(timestep)
+
+current_left_target = left_ps.getValue() if left_ps else 0.0
+current_right_target = right_ps.getValue() if right_ps else 0.0
+
+left_motor.setPosition(current_left_target)
+right_motor.setPosition(current_right_target)
 left_motor.setVelocity(0.0)
 right_motor.setVelocity(0.0)
 
@@ -138,26 +148,20 @@ def show_graphical_heatmap(rx_int, ry_int, title="Akna heatmap"):
         ax.set_xticks(range(10))
         ax.set_yticks(range(10))
         
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#ffffff')
-            spine.set_linewidth(2)
-            
-        plt.tight_layout()
-        
         filename = "szakdoga_heatmap_lose.png" if "felrobbant" in title or "BUMM" in title else "szakdoga_heatmap_win.png"
         plt.savefig(filename, dpi=200, bbox_inches='tight') 
-        print(f"\nKép sikeresen elmentve '{filename}' néven a projekt mappájába!")
-        
-        plt.show(block=True)
-        
     except ImportError:
-        print("\nMatplotlib nem található, a grafikus hőtérkép nem jelenik meg.")
+        pass
 
 def move_wheels(left_rad, right_rad, speed=2.0):
+    global current_left_target, current_right_target
+    current_left_target += left_rad
+    current_right_target += right_rad
+    
+    left_motor.setPosition(current_left_target)
+    right_motor.setPosition(current_right_target)
     left_motor.setVelocity(speed)
     right_motor.setVelocity(speed)
-    left_motor.setPosition(left_motor.getTargetPosition() + left_rad)
-    right_motor.setPosition(right_motor.getTargetPosition() + right_rad)
 
 def find_best_path(start_x, start_y, goal_x=9, goal_y=9):
     open_set = []
@@ -187,19 +191,28 @@ def find_best_path(start_x, start_y, goal_x=9, goal_y=9):
                 if cell_val >= 10.0:  
                     continue
                 
+                # --- ÚJ, BÁTOR KÓD ---
                 step_cost = 1.0 
                 if cell_val == -1:
-                    step_cost = 1.5  
+                    # Optimista megközelítés: az ismeretlen jó dolog!
+                    step_cost = 1.0  
                 else:
-                    step_cost += cell_val * 3.0  
-
-                tentative_g = g_score[current] + step_cost
+                    # Kicsit jobban félünk az aknáktól, ha már sejtjük, hogy ott vannak
+                    step_cost += cell_val * 0.3  
+                
+                # BÜNTETJÜK A VISSZALÉPÉST: Ne akarjon folyton a bejárt úton sétálni
+                if (nx, ny) in visited_tiles:
+                    step_cost += 1.5 
+                
+                tentative_g = g_score.get(current, 0) + step_cost
                 
                 if (nx, ny) not in g_score or tentative_g < g_score[(nx, ny)]:
                     came_from[(nx, ny)] = current
                     g_score[(nx, ny)] = tentative_g
+                    # Manhattani távolság a célig (heurisztika)
                     f_score = tentative_g + (abs(goal_x - nx) + abs(goal_y - ny))
                     heapq.heappush(open_set, (f_score, (nx, ny)))
+                    
     return None
 
 while robot.step(timestep) != -1:
@@ -277,8 +290,8 @@ while robot.step(timestep) != -1:
                 current_state = STATE_SCAN_TURN
             else:
                 for angle, signal in scan_results.items():
-                    nx = int(round(curr_x + math.cos(angle)))
-                    ny = int(round(curr_y + math.sin(angle)))
+                    nx = int(round(rx_int + math.cos(angle)))
+                    ny = int(round(ry_int + math.sin(angle)))
                     
                     if 0 <= nx <= 9 and 0 <= ny <= 9:
                         if signal > 900.0:
@@ -302,7 +315,7 @@ while robot.step(timestep) != -1:
         
         if path:
             target_gx, target_gy = path[0] 
-            target_yaw = math.atan2(target_gy - curr_y, target_gx - curr_x)
+            target_yaw = math.atan2(target_gy - ry_int, target_gx - rx_int)
             current_state = STATE_MOVE_TURN
         else:
             print("Az A* nem talál érvényes utat a célhoz!")
@@ -312,8 +325,8 @@ while robot.step(timestep) != -1:
             chosen_yaw = None
             
             for angle, signal in scan_results.items():
-                nx = int(round(curr_x + math.cos(angle)))
-                ny = int(round(curr_y + math.sin(angle)))
+                nx = int(round(rx_int + math.cos(angle)))
+                ny = int(round(ry_int + math.sin(angle)))
                 
                 if 0 <= nx <= 9 and 0 <= ny <= 9:
                     if signal > 900.0: 
@@ -331,7 +344,7 @@ while robot.step(timestep) != -1:
                         
             if chosen_yaw is not None:
                 print(f"-> Fallback: Próbálok a ({target_gx}, {target_gy}) felé menekülni.")
-                target_yaw = chosen_yaw
+                target_yaw = chosen_yaw 
                 current_state = STATE_MOVE_TURN
             else:
                 print("-> Totális csapda, nincs hova lépni!")
@@ -355,7 +368,7 @@ while robot.step(timestep) != -1:
     elif current_state == STATE_MOVE:
         timer += 1
         if timer == 1:
-            dist_to_go = math.sqrt((curr_x - target_gx)**2 + (curr_y - target_gy)**2)
+            dist_to_go = math.sqrt((rx_int - target_gx)**2 + (ry_int - target_gy)**2)
             dist_to_go = min(1.1, dist_to_go)
             wheel_forward = dist_to_go / WHEEL_RADIUS
             move_wheels(wheel_forward, wheel_forward, speed=3.0)

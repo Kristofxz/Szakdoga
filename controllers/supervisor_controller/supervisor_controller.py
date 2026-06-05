@@ -1,6 +1,7 @@
 from controller import Supervisor
 import random
 import math
+import csv
 
 TIME_STEP = 32
 robot = Supervisor()
@@ -8,19 +9,39 @@ root_children = robot.getRoot().getField("children")
 
 robot_node = robot.getFromDef("ROBOT") 
 emitter = robot.getDevice("emitter")
-
 receiver = robot.getDevice("rx_sup")
 if receiver:
     receiver.enable(TIME_STEP)
 
-game_walls = set()
+INITIAL_TRANS = [0.0, 0.0, 0.0969]
+INITIAL_ROT = [0.0, 0.0, 1.0, 0.0]
 
+CONTROLLERS = ["greedy_controller", "heuristic_controller", "tf_controller"]
+NUM_MAPS = 10
+MAP_SEEDS = [8574 + i for i in range(NUM_MAPS)] 
+
+current_map_idx = 0
+current_ctrl_idx = 0
+steps_taken = 0  
+MAX_STEPS = 50000 
+
+game_walls = set()
 NUM_MINES = 20
 NUM_WALLS = 25
 
+with open('evaluation_results.csv', mode='w', newline='', encoding='utf-8') as file:
+    writer = csv.writer(file)
+    writer.writerow(["Map_Seed", "Controller", "Result", "Steps", "Sim_Time_Sec"])
+
+controller_field = robot_node.getField("controller")
+if controller_field:
+    controller_field.setSFString(CONTROLLERS[current_ctrl_idx])
+
 def generate_map():
-    global game_walls
+    global game_walls, current_map_idx
     game_walls.clear()
+    
+    random.seed(MAP_SEEDS[current_map_idx])
     
     grid = [[0 for _ in range(10)] for _ in range(10)]
     safe = set()
@@ -106,9 +127,6 @@ def spawn_everything(grid):
             t = f"Solid {{ translation {wx} {wy} 0.25 children [ Shape {{ appearance PBRAppearance {{ baseColor {c} roughness 0.8 }} geometry Box {{ size 1.0 0.1 0.5 }} }} ] boundingObject Box {{ size 1.0 0.1 0.5 }} }}"
         tile_group.importMFNodeFromString(-1, t)
 
-game_grid = generate_map()
-spawn_everything(game_grid)
-
 def get_metal_signal(cx, cy, dx, dy):
     nx, ny = cx + dx, cy + dy
     if ((cx, cy), (nx, ny)) in game_walls: return 999.0
@@ -126,18 +144,56 @@ def get_metal_signal(cx, cy, dx, dy):
             if i == 1: signal += 100.0 
     return signal
 
+def print_final_statistics():
+    import csv
+    from collections import defaultdict
+     
+    stats = defaultdict(lambda: {"WIN": 0, "LOSS": 0, "TIMEOUT": 0, "STALL": 0, "total_steps": 0, "win_steps": 0, "runs": 0})
+    
+    try:
+        with open('evaluation_results.csv', mode='r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                ctrl = row["Controller"]
+                res = row["Result"]
+                steps = int(row["Steps"])
+                
+                stats[ctrl]["runs"] += 1
+                stats[ctrl][res] += 1
+                stats[ctrl]["total_steps"] += steps
+                if res == "WIN":
+                    stats[ctrl]["win_steps"] += steps
+                    
+        for ctrl, data in stats.items():
+            runs = data["runs"]
+            if runs == 0: continue
+            win_rate = (data["WIN"] / runs) * 100
+            avg_steps = data["total_steps"] / runs
+            avg_win_steps = (data["win_steps"] / data["WIN"]) if data["WIN"] > 0 else 0
+            
+            print(f"\n>>> {ctrl.upper()} EREDMÉNYEK ({runs} pálya) <<<")
+            print(f"Túlélési arány (WIN): {win_rate:.1f}% ({data['WIN']} nyert)")
+            print(f"Felrobbant (LOSS):    {data['LOSS']} alkalommal")
+            print(f"Elakadt/Időtúllépés:  {data['TIMEOUT'] + data['STALL']} alkalommal")
+            print(f"Átlagos lépésszám:    {avg_steps:.0f} lépés (Csak a sikereseknél: {avg_win_steps:.0f} lépés)")
+            
+    except Exception as e:
+        print(f"Nem sikerült a CSV-t beolvasni: {e}")
+        
+
+print(f"\n--- ÚJ PÁLYA GENERÁLÁSA ({current_map_idx+1}/{NUM_MAPS}) ---")
+game_grid = generate_map()
+spawn_everything(game_grid)
+
 exploded = False
-timeout_timer = 0 
+trans_field = robot_node.getField("translation")
+rot_field = robot_node.getField("rotation")
 
 while robot.step(TIME_STEP) != -1:
-    timeout_timer += 1
+    steps_taken += 1
     
-    manual_reset = False
-    if receiver and receiver.getQueueLength() > 0:
-        msg = receiver.getString()
+    while receiver and receiver.getQueueLength() > 0:
         receiver.nextPacket()
-        if msg.startswith("RESET"):
-            manual_reset = True
 
     if robot_node and not exploded:
         pos = robot_node.getPosition()
@@ -149,29 +205,61 @@ while robot.step(TIME_STEP) != -1:
         
         is_dead = (0 <= cx <= 9 and 0 <= cy <= 9 and game_grid[cx][cy] == 1)
         is_win = (cx >= 9 and cy >= 9)
-        is_stalled = manual_reset 
+        is_timeout = steps_taken > MAX_STEPS
 
-        if is_dead or is_win or is_stalled:
+        if is_dead or is_win or is_timeout:
             exploded = True
+            sim_time_seconds = (steps_taken * TIME_STEP) / 1000.0
+            
+            if is_dead: outcome = "LOSS"
+            elif is_win: outcome = "WIN"
+            else: outcome = "TIMEOUT"
+                
             if emitter:
-                if is_dead: msg = f"BOOM|{px:.2f}|{py:.2f}"
-                elif is_win: msg = f"WIN|{px:.2f}|{py:.2f}"
-                else: msg = f"STALL|{px:.2f}|{py:.2f}"
+                msg = f"{outcome if outcome != 'LOSS' else 'BOOM'}|{px:.2f}|{py:.2f}"
                 emitter.send(msg.encode('utf-8'))
+                
+            with open('evaluation_results.csv', mode='a', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerow([MAP_SEEDS[current_map_idx], CONTROLLERS[current_ctrl_idx], outcome, steps_taken, sim_time_seconds])
             
-            for _ in range(3): robot.step(TIME_STEP)
+            print(f"Pálya: {current_map_idx+1}/{NUM_MAPS} | Kontroller: {CONTROLLERS[current_ctrl_idx]} -> {outcome} ({sim_time_seconds:.2f} s)")
             
-            game_grid = generate_map()
-            spawn_everything(game_grid)
+            current_ctrl_idx += 1
+            if current_ctrl_idx >= len(CONTROLLERS):
+                current_ctrl_idx = 0
+                current_map_idx += 1
+                
+                if current_map_idx >= NUM_MAPS:
+                    print_final_statistics() # <--- Ide jön a statisztika!
+                    print("\n=== KIÉRTÉKELÉS BEFEJEZVE! ===")
+                    robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
+                    break
+                
+                print(f"\n--- ÚJ PÁLYA GENERÁLÁSA ({current_map_idx+1}/{NUM_MAPS}) ---")
+                
+                game_grid = generate_map()
+                spawn_everything(game_grid)
             
-            trans_field = robot_node.getField("translation")
-            rot_field = robot_node.getField("rotation")
-            if trans_field and rot_field:
-                trans_field.setSFVec3f([0.0, 0.0, 0.0969]) 
-                rot_field.setSFRotation([0.0, 0.0, 1.0, 0.0])
-                robot_node.resetPhysics()
+            controller_field.setSFString(CONTROLLERS[current_ctrl_idx])
             
-            timeout_timer = 0 
+            for _ in range(10):
+                if trans_field and rot_field:
+                    trans_field.setSFVec3f(INITIAL_TRANS)
+                    rot_field.setSFRotation(INITIAL_ROT)
+                    robot_node.resetPhysics()
+                    
+                    try: 
+                        robot_node.setVelocity([0, 0, 0, 0, 0, 0])
+                    except: 
+                        pass
+                        
+                robot.step(TIME_STEP)
+            
+            while receiver and receiver.getQueueLength() > 0:
+                receiver.nextPacket()
+            
+            steps_taken = 0 
             exploded = False
             continue
 
