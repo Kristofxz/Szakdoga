@@ -9,25 +9,20 @@ right_motor = robot.getDevice('right wheel')
 rx = robot.getDevice('rx0')
 if rx: rx.enable(timestep)
 
-# --- A HIBA OKA ÉS A MEGOLDÁS: A "SNAPBACK" MEGELŐZÉSE ---
 left_ps = left_motor.getPositionSensor()
 right_ps = right_motor.getPositionSensor()
 if left_ps: left_ps.enable(timestep)
 if right_ps: right_ps.enable(timestep)
 
-# Várunk picit, hogy a szenzor felébredjen
 for _ in range(2): robot.step(timestep)
 
-# Lekérjük az aktuális "feltekert" pozíciót
 current_left_target = left_ps.getValue() if left_ps else 0.0
 current_right_target = right_ps.getValue() if right_ps else 0.0
 
-# Ezt állítjuk be célnak, így nem próbál meg visszaugrani 0-ra!
 left_motor.setPosition(current_left_target)
 right_motor.setPosition(current_right_target)
 left_motor.setVelocity(0.0)
 right_motor.setVelocity(0.0)
-# ---------------------------------------------------------
 
 WHEEL_RADIUS = 0.0975
 AXLE_LENGTH = 0.33 
@@ -42,7 +37,7 @@ STATE_MOVE = "MOVE"
 current_state = STATE_INIT_SCAN
 timer = 0
 scan_directions = [0.0, math.pi/2, math.pi, -math.pi/2]
-dir_names = ["Kelet", "Észak", "Nyugat", "Dél"]
+#dir_names = ["Kelet", "Észak", "Nyugat", "Dél"]
 current_scan_index = 0
 scan_results = {}
 target_yaw, target_gx, target_gy = 0.0, 0, 0
@@ -85,7 +80,7 @@ def show_graphical_heatmap(rx_int, ry_int, title="Akna heatmap"):
             for x in range(10):
                 val = plot_data[y, x]
                 if x == rx_int and y == ry_int:
-                    text_val = "☠️" if "BUMM" in title else "🤖"
+                    text_val = "B" if "BUMM" in title else "R"
                 else:
                     text_val = "X" if val == -1 else f"{val:.0f}"
                 color = "white" if val > 3 else "black"
@@ -112,7 +107,6 @@ def show_graphical_heatmap(rx_int, ry_int, title="Akna heatmap"):
     except ImportError:
         pass
 
-# --- Relatív mozgatás a belső változók növelésével ---
 def move_wheels(left_rad, right_rad, speed=2.0):
     global current_left_target, current_right_target
     current_left_target += left_rad
@@ -132,7 +126,7 @@ while robot.step(timestep) != -1:
             left_motor.setVelocity(0.0)
             right_motor.setVelocity(0.0)
             death_x, death_y = int(round(float(data[1]))), int(round(float(data[2])))
-            print("\nRáléptél egy aknára!")
+            print("\n[BUMM] Ráléptél egy aknára!")
             print_heatmap(death_x, death_y)
             show_graphical_heatmap(death_x, death_y, title="A robot felrobbant!")
             break
@@ -159,7 +153,7 @@ while robot.step(timestep) != -1:
 
     if rx_int >= 9 and ry_int >= 9:
         left_motor.setVelocity(0.0); right_motor.setVelocity(0.0)
-        print("CÉL ELÉRVE!")
+        print("[SIKER] CÉL ELÉRVE!")
         print_heatmap(rx_int, ry_int)
         show_graphical_heatmap(rx_int, ry_int, title="Túlélte a robot.")
         break
@@ -232,7 +226,7 @@ while robot.step(timestep) != -1:
             target_yaw = chosen_yaw
             current_state = STATE_MOVE_TURN
         else:
-            print("Teljesen beszorultam, nincs hova lépni!")
+            print("Teljesen beszorult, nincs hova lépni!")
             current_state = STATE_INIT_SCAN
 
     elif current_state == STATE_MOVE_TURN:

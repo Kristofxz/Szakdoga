@@ -17,7 +17,7 @@ INITIAL_TRANS = [0.0, 0.0, 0.0969]
 INITIAL_ROT = [0.0, 0.0, 1.0, 0.0]
 
 CONTROLLERS = ["greedy_controller", "heuristic_controller", "tf_controller"]
-NUM_MAPS = 10
+NUM_MAPS = 100
 MAP_SEEDS = [8574 + i for i in range(NUM_MAPS)] 
 
 current_map_idx = 0
@@ -62,7 +62,8 @@ def generate_map():
     random.shuffle(cells)
     
     for i in range(min(NUM_MINES, len(cells))):
-        x, y = cells[i]; grid[x][y] = 1 
+        x, y = cells[i]; 
+        grid[x][y] = 1 
 
     all_edges = []
     for x in range(10):
@@ -231,7 +232,7 @@ while robot.step(TIME_STEP) != -1:
                 current_map_idx += 1
                 
                 if current_map_idx >= NUM_MAPS:
-                    print_final_statistics() # <--- Ide jön a statisztika!
+                    print_final_statistics() 
                     print("\n=== KIÉRTÉKELÉS BEFEJEZVE! ===")
                     robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
                     break

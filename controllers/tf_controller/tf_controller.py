@@ -271,7 +271,6 @@ class MinesweeperEnv(gym.Env):
             if not terminated: reward -= 1000.0 
             
         return obs, float(reward), terminated, truncated, {}
-
 # if __name__ == "__main__":
     # env = MinesweeperEnv()
     
@@ -281,10 +280,10 @@ class MinesweeperEnv(gym.Env):
     # checkpoint_callback = CheckpointCallback(save_freq=5000, save_path=CHECKPOINT_DIR, name_prefix='v8_aggressive_fast')
 
     # if os.path.exists(MODEL_PATH):
-        # print(f"🔄 Modell betöltése: {MODEL_PATH}")
+        # print(f"Modell betöltése: {MODEL_PATH}")
         # model = PPO.load(MODEL_PATH, env=env)
     # else:
-        # print("🚀 Új, Agresszív (v8) tanulás indítása...")
+        # print("Tanulás indítása...")
         # policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])])
         # model = PPO("MlpPolicy", env, policy_kwargs=policy_kwargs, verbose=1, 
                     # learning_rate=0.001, ent_coef=0.1, clip_range=0.2, 
@@ -297,9 +296,9 @@ class MinesweeperEnv(gym.Env):
         # print("Tanítás befejezve és modell elmentve.")
         
     # except Exception as e:
-        # print(f"\n❌ Tanítás megszakadt ({e}), utolsó állapot mentése...")
-        # model.save(os.path.join(CHECKPOINT_DIR, "v8_interrupted_model"))
-        
+        # print(f"\n Tanítás megszakadt ({e}), utolsó állapot mentése...")
+        # model.save(os.path.join(CHECKPOINT_DIR, "interrupted_model"))
+    
 if __name__ == "__main__":
     env = MinesweeperEnv()
     
@@ -313,7 +312,7 @@ if __name__ == "__main__":
         print("Nem található a betanított modell! Ellenőrizd az elérési utat.")
         exit()
 
-    print(" Tesztelési (Kijátszási) mód indítása...")
+    print(" Tesztelési mód indítása...")
     
     obs, info = env.reset()
     
@@ -323,5 +322,5 @@ if __name__ == "__main__":
         obs, reward, terminated, truncated, info = env.step(action)
         
         if terminated or truncated:
-            print(f"🏁 Epizód vége (Jutalom az utolsó lépésnél: {reward}). Új pálya generálása...")
+            print(f"Epizód vége (Jutalom az utolsó lépésnél: {reward}). Új pálya generálása...")
             obs, info = env.reset()

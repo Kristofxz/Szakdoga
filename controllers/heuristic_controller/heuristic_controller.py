@@ -112,7 +112,7 @@ def show_graphical_heatmap(rx_int, ry_int, title="Akna heatmap"):
             for x in range(10):
                 val = plot_data[y, x]
                 if x == rx_int and y == ry_int:
-                    text_val = "💥" if "felrobbant" in title or "BUMM" in title else "🤖"
+                    text_val = "B" if "felrobbant" in title or "BUMM" in title else "R"
                 elif val == -1:
                     text_val = "" 
                 elif val >= 900:
@@ -191,16 +191,12 @@ def find_best_path(start_x, start_y, goal_x=9, goal_y=9):
                 if cell_val >= 10.0:  
                     continue
                 
-                # --- ÚJ, BÁTOR KÓD ---
                 step_cost = 1.0 
                 if cell_val == -1:
-                    # Optimista megközelítés: az ismeretlen jó dolog!
                     step_cost = 1.0  
                 else:
-                    # Kicsit jobban félünk az aknáktól, ha már sejtjük, hogy ott vannak
                     step_cost += cell_val * 0.3  
                 
-                # BÜNTETJÜK A VISSZALÉPÉST: Ne akarjon folyton a bejárt úton sétálni
                 if (nx, ny) in visited_tiles:
                     step_cost += 1.5 
                 
@@ -209,7 +205,6 @@ def find_best_path(start_x, start_y, goal_x=9, goal_y=9):
                 if (nx, ny) not in g_score or tentative_g < g_score[(nx, ny)]:
                     came_from[(nx, ny)] = current
                     g_score[(nx, ny)] = tentative_g
-                    # Manhattani távolság a célig (heurisztika)
                     f_score = tentative_g + (abs(goal_x - nx) + abs(goal_y - ny))
                     heapq.heappush(open_set, (f_score, (nx, ny)))
                     
@@ -229,13 +224,13 @@ while robot.step(timestep) != -1:
             px, py = int(round(float(data[1]))), int(round(float(data[2])))
             
             if data[0] == "BOOM":
-                print("\n💥 Ráléptél egy aknára!")
+                print("\n[BUMM] Ráléptél egy aknára!")
                 title = "A robot felrobbant!"
             elif data[0] == "WIN":
-                print("\n🏆 CÉL ELÉRVE!")
+                print("\n[SIKER] CÉL ELÉRVE!")
                 title = "Túlélte a robot."
             else:
-                print("\n🛑 Beszorult a robot (STALL)!")
+                print("\n[HIBA] Beszorult a robot (STALL)!")
                 title = "A robot beszorult."
                 
             print_heatmap(px, py)
@@ -319,7 +314,6 @@ while robot.step(timestep) != -1:
             current_state = STATE_MOVE_TURN
         else:
             print("Az A* nem talál érvényes utat a célhoz!")
-            print("-> Vészhelyzeti manőver: a legbiztonságosabb szomszéd keresése...")
             
             best_fallback_score = 99999
             chosen_yaw = None

@@ -5,7 +5,7 @@ sceneTreePerspectives: 000000ff000000010000000300000022000001ba000000fa010000000
 maximizedDockId: -1
 centralWidgetVisible: 1
 orthographicViewHeight: 1
-textFiles: 0 "../my_supervisor/controllers/supervisor_controller/supervisor_controller.py" "controllers/supervisor_controller/supervisor_controller.py" "controllers/tf_controller/tf_controller.py" "controllers/heuristic_controller/heuristic_controller.py" "controllers/greedy_controller/greedy_controller.py"
+textFiles: 4 "../my_supervisor/controllers/supervisor_controller/supervisor_controller.py" "controllers/supervisor_controller/supervisor_controller.py" "controllers/tf_controller/tf_controller.py" "controllers/heuristic_controller/heuristic_controller.py" "controllers/greedy_controller/greedy_controller.py"
 globalOptionalRendering: CoordinateSystem::LightSensorRays::LidarRaysPaths::RadarFrustums
 consoles: Console:All:All
 consoles: Console:All:All
