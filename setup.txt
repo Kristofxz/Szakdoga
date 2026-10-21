@@ -1,0 +1,21 @@
+Környezet előkészítése:
+
+1. Fontos, hogy Python 3.10.x legyen telepítve.
+2. Webotsban be kell állítani a pontos Python verziót: 
+   A felső menüben Tools -> Preferences, majd a "Python command" mezőbe be kell írni: py -3.10
+3. Nyiss egy terminált a projekt mappájában, és telepítsd a szükséges könyvtárakat:
+   py -3.10 -m pip install -r requirements.txt
+4. Nyisd meg a pályát: 
+   Webots -> File -> Open World -> szakdolgozat/worlds/szakdolgozat.wbt
+
+Tanításhoz:
+
+1. A Supervisor node-hoz a Scene Tree-ben a kontrolleren belül a "supervisor_tanito.py" kontrollert kell választani.
+2. A Pioneer3dx robot kontrolleréhez a "tf_controller"-t kell választani.
+3. Ha létezik a "mentett_modellek/final_model.zip" fájl, azt törölni kell (ha teljesen új tanítást szeretnénk indítani).
+4. A "tf_controller.py" fájlban a tesztelő szkript részét ki kell kommentezni, az előtte lévő tanító szkript rész elől pedig ki kell venni a kommenteket.
+
+Teszteléshez:
+
+1. A Supervisor node-hoz a "supervisor_controller.py" kontrollert kell rendelni.
+2. A "tf_controller.py" fájlban a tanító szkript részt ki kell kommentezni, a tesztelő elől pedig ki kell venni a kommentet.
