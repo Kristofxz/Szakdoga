@@ -1,0 +1,5 @@
+#ajanlott python==3.10.11
+gymnasium==1.2.3
+matplotlib==3.5.3
+numpy==2.5.4
+stable_baselines3==2.8.0

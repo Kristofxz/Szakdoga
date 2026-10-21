@@ -1,4 +1,14 @@
+"""
+Webots Ágens Modul: Mély Megerősítéses Tanulás (Deep RL) Vezérlő.
+
+A jelen modul egy Proximal Policy Optimization alapú neurális
+ágenst implementál. A környezet a Gymnasium keretrendszer API-jára
+épül, amely biztosítja a Markov Döntési Folyamat 
+állapotátmeneteinek és jutalmazási függvényeinek kezelését.
+"""
+
 import os
+# A TensorFlow C++ figyelmeztetéseinek elnyomása a tiszta kimenetért.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import math
@@ -9,31 +19,55 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 from controller import Robot
 
+
 class MinesweeperEnv(gym.Env):
+    """
+    Egyedi Gymnasium környezet (Environment) a Webots szimuláció és a 
+    Stable Baselines3 algoritmusok közötti interfész biztosítására.
+    """
+
     def __init__(self):
+        """
+        A környezet, az akciótér és a megfigyelési tér inicializálása.
+        """
         super(MinesweeperEnv, self).__init__()
         
+        # A fizikai ágens és a szimulációs időlépés inicializálása.
         self.robot = Robot()
         self.timestep = int(self.robot.getBasicTimeStep())
+        
+        # Beavatkozó szervek (aktuátorok) azonosítása.
         self.left_motor = self.robot.getDevice('left wheel')
         self.right_motor = self.robot.getDevice('right wheel')
         
+        # Aszinkron kommunikációs interfészek konfigurálása.
         self.rx = self.robot.getDevice('rx0')
         self.rx.enable(self.timestep)
         self.tx = self.robot.getDevice('tx0') 
 
+        # Akciótér: A hálózat kimenete 4 diszkrét irány.
         self.action_space = spaces.Discrete(4)
         
-        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(14,), dtype=np.float32)
+        # Megfigyelési tér: 14-dimenziós, normalizált folytonos vektor.
+        self.observation_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(14,), dtype=np.float32
+        )
         
+        # Epizodikus memória és terminálási változók.
         self.visited_tiles = {}
-        self.max_steps = 300 
+        self.max_steps = 300
         self.current_step = 0
         self.global_steps = 0 
         self.last_data = None
         self.last_euclidean_dist = 999.0
 
     def _step_webots(self):
+        """
+        A fizikai motor szinkronizációja és a telemetria feldolgozása.
+
+        Returns:
+            dict: A dekódolt környezeti állapotvektor szótárként.
+        """
         if self.robot.step(self.timestep) == -1:
             exit(0)
             
@@ -48,12 +82,27 @@ class MinesweeperEnv(gym.Env):
             elif len(data) >= 7:
                 latest_data = {
                     "type": "STATE",
-                    "sigs": [float(data[0]), float(data[1]), float(data[2]), float(data[3])],
-                    "px": float(data[4]), "py": float(data[5]), "yaw": float(data[6])
+                    "sigs": [
+                        float(data[0]), float(data[1]), 
+                        float(data[2]), float(data[3])
+                    ],
+                    "px": float(data[4]), 
+                    "py": float(data[5]), 
+                    "yaw": float(data[6])
                 }
         return latest_data
 
     def _turn_to_angle(self, target_yaw, is_radar=False):
+        """
+        Zárt hurkú Proporcionális irányszög-szabályozás.
+
+        Args:
+            target_yaw (float): A cél irányszög radiánban.
+            is_radar (bool): Fix sebességű üzemmód a szkenneléshez.
+
+        Returns:
+            dict: Az utolsó mért állapotvektor.
+        """
         self.left_motor.setPosition(float('inf'))
         self.right_motor.setPosition(float('inf'))
         
@@ -63,14 +112,19 @@ class MinesweeperEnv(gym.Env):
         while timeout < max_turn_steps:
             timeout += 1
             data = self._step_webots()
-            if data is None: continue
-            if data["type"] != "STATE": return data 
+            if data is None:
+                continue
+            if data["type"] != "STATE":
+                return data 
             
             curr_yaw = data["yaw"]
             error = target_yaw - curr_yaw
-            while error > math.pi: error -= 2*math.pi
-            while error < -math.pi: error += 2*math.pi
+            while error > math.pi:
+                error -= 2 * math.pi
+            while error < -math.pi:
+                error += 2 * math.pi
             
+            # Tolerancia sáv elérése.
             if abs(error) < 0.05:
                 self.left_motor.setVelocity(0.0)
                 self.right_motor.setVelocity(0.0)
@@ -82,34 +136,56 @@ class MinesweeperEnv(gym.Env):
                 speed = max(2.0, min(10.0, abs(error) * 10.0))
                 
             if error > 0:
-                self.left_motor.setVelocity(-speed); self.right_motor.setVelocity(speed)
+                self.left_motor.setVelocity(-speed)
+                self.right_motor.setVelocity(speed)
             else:
-                self.left_motor.setVelocity(speed); self.right_motor.setVelocity(-speed)
+                self.left_motor.setVelocity(speed)
+                self.right_motor.setVelocity(-speed)
                 
         self.left_motor.setVelocity(0.0)
         self.right_motor.setVelocity(0.0)
         return self.last_data 
         
     def _radar_sweep(self):
-        angles = [0.0, math.pi/2, math.pi, -math.pi/2]
+        """
+        A 360 fokos topológia letapogatása a megfigyeléshez.
+
+        Returns:
+            dict: Az összeállított állapotvektor adatai.
+        """
+        angles = [0.0, math.pi / 2, math.pi, -math.pi / 2]
         for angle in angles:
             new_data = self._turn_to_angle(angle, is_radar=True)
             if new_data and new_data["type"] == "STATE":
                 self.last_data = new_data
+            
+            # A mechanikai lengések csillapítása a pontos mérésért.
             for _ in range(5): 
                 self._step_webots()
         return self.last_data
 
     def _get_euclidean_distances(self, rx, ry):
+        """
+        Távolságbecslés (térbeli gradiens) generálása a hálózatnak.
+
+        Args:
+            rx (int): Az ágens X rácskoordinátája.
+            ry (int): Az ágens Y rácskoordinátája.
+
+        Returns:
+            tuple: A jelenlegi és a szomszédos cellák távolságai.
+        """
         target_x, target_y = 9, 9
         curr_dist = math.sqrt((target_x - rx)**2 + (target_y - ry)**2)
         
-        dirs = [(1,0), (0,1), (-1,0), (0,-1)]
+        dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)]
         neighbor_dists = []
         for dx, dy in dirs:
             nx, ny = rx + dx, ry + dy
             if 0 <= nx <= 9 and 0 <= ny <= 9:
-                dist = math.sqrt((target_x - nx)**2 + (target_y - ny)**2)
+                dist = math.sqrt(
+                    (target_x - nx)**2 + (target_y - ny)**2
+                )
                 neighbor_dists.append(dist)
             else:
                 neighbor_dists.append(999.0) 
@@ -117,12 +193,22 @@ class MinesweeperEnv(gym.Env):
         return curr_dist, neighbor_dists
 
     def _build_obs(self, data):
+        """
+        Állapottér normalizálása a hálózat számára (-1.0 és 1.0 közé).
+
+        Args:
+            data (dict): A nyers fizikai szenzoradatok.
+
+        Returns:
+            tuple: (Folytonos tenzor, Diszkrét X, Diszkrét Y).
+        """
         rx_int = max(0, min(9, round(data["px"])))
         ry_int = max(0, min(9, round(data["py"])))
         
-        dirs = [(1,0), (0,1), (-1,0), (0,-1)]
+        dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)]
         scaled_sigs = []
         
+        # Szenzoradatok normalizálása és vágása.
         for i, (dx, dy) in enumerate(dirs):
             sig = data["sigs"][i]
             if sig >= 10.0:
@@ -131,17 +217,22 @@ class MinesweeperEnv(gym.Env):
                 scaled_sig = sig / 10.0  
             scaled_sigs.append(scaled_sig)
             
-        current_eucl_dist, eucl_neighbors = self._get_euclidean_distances(rx_int, ry_int)
+        current_eucl_dist, eucl_neighbors = \
+            self._get_euclidean_distances(rx_int, ry_int)
         self.last_euclidean_dist = current_eucl_dist
         
+        # Távolságok skálázása a maximális átló alapján.
         norm_eucl = [min(1.0, d / 15.0) for d in eucl_neighbors]
         
+        # Hurok-detektálás skálázása a felfedezés ösztönzéséhez.
         visited_adj = []
         for dx, dy in dirs:
             nx, ny = rx_int + dx, ry_int + dy
             v = self.visited_tiles.get((nx, ny), 0)
+        #Maximum 10 lehet az értéke a v-nek, mert lekorlátozom.
             visited_adj.append(min(1.0, v / 10.0))
         
+        # A 14-dimenziós vektor 32-bites lebegőpontos tenzorként.
         obs = np.concatenate([
             [rx_int / 9.0, ry_int / 9.0],  
             scaled_sigs,                   
@@ -152,16 +243,29 @@ class MinesweeperEnv(gym.Env):
         return obs, rx_int, ry_int
 
     def reset(self, seed=None, options=None):
+        """
+        Epizód inicializálása és Curriculum Learning fázis.
+
+        Args:
+            seed (int): Véletlenszám-generátor magja.
+            options (dict): Extra Gymnasium paraméterek.
+
+        Returns:
+            tuple: Kezdeti megfigyelési vektor és információs szótár.
+        """
         super().reset(seed=seed)
+        
         self.visited_tiles.clear()
         self.visited_tiles[(0, 0)] = 1
         self.current_step = 0
         self.last_euclidean_dist = 999.0
         
+        # A feladat komplexitásának növelése a lépések függvényében.
         level = min(5, (self.global_steps // 50000) + 1)
         if self.tx: 
             self.tx.send(f"RESET|{level}".encode('utf-8'))
             
+        # Blokkolás a fizikai visszaállítás befejezéséig.
         while True:
             data = self._step_webots()
             if data and data["type"] == "STATE":
@@ -172,24 +276,47 @@ class MinesweeperEnv(gym.Env):
                     return obs, {}
 
     def _move_to_cell(self, target_gx, target_gy):
+        """
+        Zárt hurkú útvonalkövető szabályozó.
+
+        Args:
+            target_gx (int): Cél X rácskoordináta.
+            target_gy (int): Cél Y rácskoordináta.
+
+        Returns:
+            dict: A manőver végén rögzített állapot.
+        """
         self.left_motor.setPosition(float('inf'))
         self.right_motor.setPosition(float('inf'))
         
         last_d = None
+        # Holtpont elleni védelem az elakadások ellen.
         for _ in range(250): 
             d = self._step_webots()
-            if d: last_d = d
-            if last_d and last_d["type"] != "STATE": break
+            if d:
+                last_d = d
+            if last_d and last_d["type"] != "STATE":
+                break
             
             if last_d and last_d["type"] == "STATE":
-                curr_x, curr_y, curr_yaw = last_d["px"], last_d["py"], last_d["yaw"]
-                dist = math.sqrt((target_gx - curr_x)**2 + (target_gy - curr_y)**2)
-                if dist < 0.15: break
+                curr_x = last_d["px"]
+                curr_y = last_d["py"]
+                curr_yaw = last_d["yaw"]
+                
+                dist = math.sqrt(
+                    (target_gx - curr_x)**2 + (target_gy - curr_y)**2
+                )
+                if dist < 0.15:
+                    break
                     
-                target_angle = math.atan2(target_gy - curr_y, target_gx - curr_x)
+                target_angle = math.atan2(
+                    target_gy - curr_y, target_gx - curr_x
+                )
                 error = target_angle - curr_yaw
-                while error > math.pi: error -= 2*math.pi
-                while error < -math.pi: error += 2*math.pi
+                while error > math.pi:
+                    error -= 2 * math.pi
+                while error < -math.pi:
+                    error += 2 * math.pi
                 
                 base_speed = 6.0 
                 correction = error * 8.0 
@@ -204,14 +331,24 @@ class MinesweeperEnv(gym.Env):
         self.right_motor.setVelocity(0.0)
         for _ in range(3):
             d = self._step_webots()
-            if d: last_d = d
+            if d:
+                last_d = d
         return last_d
 
     def step(self, action):
+        """
+        Az MDP iterációs lépése és a jutalmazás (Reward Shaping).
+
+        Args:
+            action (int): A neurális hálózat által választott akció.
+
+        Returns:
+            tuple: Új obs, jutalom, terminated, truncated, info.
+        """
         self.current_step += 1
         self.global_steps += 1 
         
-        target_angles = [0.0, math.pi/2, math.pi, -math.pi/2] 
+        target_angles = [0.0, math.pi / 2, math.pi, -math.pi / 2] 
         target_yaw = target_angles[action]
         
         if self.last_data is None or self.last_data["type"] != "STATE":
@@ -223,10 +360,11 @@ class MinesweeperEnv(gym.Env):
         
         old_eucl_dist = self.last_euclidean_dist
         
-        reward = -2.0 
+        reward = -2.0  # Alapértelmezett lépésköltség.
         terminated = False
         truncated = False
         
+        # Szigorú korlátok: fizikai akadály vagy szakadék érzékelése.
         if sig_for_action >= 100.0: 
             reward -= 300.0 
             obs, _, _ = self._build_obs(self.last_data)
@@ -239,11 +377,14 @@ class MinesweeperEnv(gym.Env):
             
             if final_data and final_data["type"] in ["BOOM", "WIN", "STALL"]:
                 terminated = True
-                if final_data["type"] == "WIN": reward += 2000.0
-                elif final_data["type"] == "BOOM": reward -= 300.0 
+                if final_data["type"] == "WIN":
+                    reward += 2000.0
+                elif final_data["type"] == "BOOM":
+                    reward -= 300.0 
                 obs = np.zeros(14, dtype=np.float32)
             else:
-                if final_data: self.last_data = final_data
+                if final_data:
+                    self.last_data = final_data
                 
                 self._radar_sweep() 
                 obs, new_rx, new_ry = self._build_obs(self.last_data)
@@ -253,11 +394,15 @@ class MinesweeperEnv(gym.Env):
                     terminated = True 
                 else:
                     new_eucl_dist = self.last_euclidean_dist
-                    
                     progress = old_eucl_dist - new_eucl_dist
+                    
+                    # Fizikai anomáliák szűrése.
+                    #TODO1: Progress mekkora ertek lehet
                     progress_clipped = max(-3.0, min(3.0, progress))
                     reward += progress_clipped * 10.0
                     
+                    # Kognitív explorációs bónusz és hurok-büntetés.
+                    #TODO2: reward fuggveny reszletes dokumentalasa (tablazat)
                     visits = self.visited_tiles.get((new_rx, new_ry), 0)
                     if visits == 0:
                         reward += 5.0 
@@ -266,61 +411,73 @@ class MinesweeperEnv(gym.Env):
                         
                     self.visited_tiles[(new_rx, new_ry)] = visits + 1
 
+        # Időtúllépés büntetése.
         if self.current_step >= self.max_steps:
             truncated = True
-            if not terminated: reward -= 1000.0 
+            if not terminated:
+                reward -= 1000.0 
             
         return obs, float(reward), terminated, truncated, {}
-# if __name__ == "__main__":
-    # env = MinesweeperEnv()
-    
-    # CHECKPOINT_DIR = r"C:\Users\Kristof\Documents\szakdolgozat\controllers\tf_controller\mentett_modellek"
-    # MODEL_PATH = os.path.join(CHECKPOINT_DIR, "v8_final_model_complete.zip")
-    
-    # checkpoint_callback = CheckpointCallback(save_freq=5000, save_path=CHECKPOINT_DIR, name_prefix='v8_aggressive_fast')
 
-    # if os.path.exists(MODEL_PATH):
-        # print(f"Modell betöltése: {MODEL_PATH}")
-        # model = PPO.load(MODEL_PATH, env=env)
-    # else:
-        # print("Tanulás indítása...")
-        # policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])])
-        # model = PPO("MlpPolicy", env, policy_kwargs=policy_kwargs, verbose=1, 
-                    # learning_rate=0.001, ent_coef=0.1, clip_range=0.2, 
-                    # n_steps=1024, batch_size=64)
-
-    # print("Tanítás megkezdése...")
-    # try:
-        # model.learn(total_timesteps=500_000, reset_num_timesteps=False, callback=checkpoint_callback)
-        # model.save(os.path.join(CHECKPOINT_DIR, "v8_final_model_complete"))
-        # print("Tanítás befejezve és modell elmentve.")
-        
-    # except Exception as e:
-        # print(f"\n Tanítás megszakadt ({e}), utolsó állapot mentése...")
-        # model.save(os.path.join(CHECKPOINT_DIR, "interrupted_model"))
-    
+# Tanító script.
 if __name__ == "__main__":
     env = MinesweeperEnv()
     
-    CHECKPOINT_DIR = r"C:\Users\Kristof\Documents\szakdolgozat\controllers\tf_controller\mentett_modellek"
-    MODEL_PATH = os.path.join(CHECKPOINT_DIR, "v8_final_model_complete.zip")
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CHECKPOINT_DIR = os.path.join(BASE_DIR, "mentett_modellek")
+    MODEL_PATH = os.path.join(CHECKPOINT_DIR, "final_model.zip")
     
+    # Mappa létrehozása, ha nem létezik a futtató gépén.
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    
+    checkpoint_callback = CheckpointCallback(
+        save_freq=5000, save_path=CHECKPOINT_DIR, name_prefix='v8'
+    )
+
     if os.path.exists(MODEL_PATH):
-        print(f"Kész modell betöltése teszteléshez: {MODEL_PATH}")
+        print(f"Modell betöltése: {MODEL_PATH}")
         model = PPO.load(MODEL_PATH, env=env)
     else:
-        print("Nem található a betanított modell! Ellenőrizd az elérési utat.")
-        exit()
+        print("Új tanulás indítása...")
+        policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])])
+        model = PPO("MlpPolicy", env, policy_kwargs=policy_kwargs, verbose=1, 
+                    learning_rate=0.001, ent_coef=0.1, clip_range=0.2, 
+                    n_steps=1024, batch_size=64)
 
-    print(" Tesztelési mód indítása...")
+    print("Tanítás megkezdése...")
+    try:
+        model.learn(total_timesteps=500_000, reset_num_timesteps=False, callback=checkpoint_callback)
+        model.save(os.path.join(CHECKPOINT_DIR, "final_model"))
+        print("Tanítás befejezve és modell elmentve.")
+    except Exception as e:
+        print(f"\n Tanítás megszakadt ({e}), utolsó állapot mentése...")
+        model.save(os.path.join(CHECKPOINT_DIR, "interrupted_model"))
+
+#Tesztelő script.
+# if __name__ == "__main__":
+    # env = MinesweeperEnv()
     
-    obs, info = env.reset()
+    # BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # CHECKPOINT_DIR = os.path.join(BASE_DIR, "mentett_modellek")
+    # MODEL_PATH = os.path.join(CHECKPOINT_DIR, "final_model.zip")
     
-    while True:
-        action, _states = model.predict(obs, deterministic=False)
+    A kiértékelési fázis inicializálása a súlyok betöltésével.
+    # if os.path.exists(MODEL_PATH):
+        # print(f"Kész modell betöltése teszteléshez: {MODEL_PATH}")
+        # model = PPO.load(MODEL_PATH, env=env)
+    # else:
+        # print(f"Nincs betanított modell a következő helyen:\n{MODEL_PATH}\nEllenőrizd az elérési utat!")
+        # exit()
+
+    # print("Tesztelési mód indítása...")
+    # obs, info = env.reset()
+    
+    A futásidejű vezérlési hurok.
+    # while True:
+        Sztochasztikus mintavételezés a lokális optimumok elkerülésére.
+        # action, _states = model.predict(obs, deterministic=False)
+        # obs, reward, terminated, truncated, info = env.step(action)
         
-        obs, reward, terminated, truncated, info = env.step(action)
-        
-        if terminated or truncated:
-            print(f"Epizód vége (Jutalom az utolsó lépésnél: {reward}). Új pálya generálása...")
-            obs, info = env.reset()
+        # if terminated or truncated:
+            # print(f"Epizód vége (Jutalom: {reward}). Új pálya...")
+            # obs, info = env.reset()
