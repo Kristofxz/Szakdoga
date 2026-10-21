@@ -427,7 +427,7 @@ if __name__ == "__main__":
     CHECKPOINT_DIR = os.path.join(BASE_DIR, "mentett_modellek")
     MODEL_PATH = os.path.join(CHECKPOINT_DIR, "final_model.zip")
     
-    # Mappa létrehozása, ha nem létezik a futtató gépén.
+    ## Mappa létrehozása, ha nem létezik a futtató gépén.
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     
     checkpoint_callback = CheckpointCallback(
@@ -453,7 +453,7 @@ if __name__ == "__main__":
         print(f"\n Tanítás megszakadt ({e}), utolsó állapot mentése...")
         model.save(os.path.join(CHECKPOINT_DIR, "interrupted_model"))
 
-#Tesztelő script.
+# #Tesztelő script.
 # if __name__ == "__main__":
     # env = MinesweeperEnv()
     
@@ -461,7 +461,7 @@ if __name__ == "__main__":
     # CHECKPOINT_DIR = os.path.join(BASE_DIR, "mentett_modellek")
     # MODEL_PATH = os.path.join(CHECKPOINT_DIR, "final_model.zip")
     
-    A kiértékelési fázis inicializálása a súlyok betöltésével.
+ # ##    A kiértékelési fázis inicializálása a súlyok betöltésével.
     # if os.path.exists(MODEL_PATH):
         # print(f"Kész modell betöltése teszteléshez: {MODEL_PATH}")
         # model = PPO.load(MODEL_PATH, env=env)
@@ -472,9 +472,9 @@ if __name__ == "__main__":
     # print("Tesztelési mód indítása...")
     # obs, info = env.reset()
     
-    A futásidejű vezérlési hurok.
+ # ##    A futásidejű vezérlési hurok.
     # while True:
-        Sztochasztikus mintavételezés a lokális optimumok elkerülésére.
+ # ##        Sztochasztikus mintavételezés a lokális optimumok elkerülésére.
         # action, _states = model.predict(obs, deterministic=False)
         # obs, reward, terminated, truncated, info = env.step(action)
         
