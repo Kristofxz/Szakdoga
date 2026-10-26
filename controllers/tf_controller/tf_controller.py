@@ -17,6 +17,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.logger import configure
 from controller import Robot
 
 
@@ -419,16 +420,17 @@ class MinesweeperEnv(gym.Env):
             
         return obs, float(reward), terminated, truncated, {}
 
-# Tanító script.
+# Tanító script
 if __name__ == "__main__":
     env = MinesweeperEnv()
     
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     CHECKPOINT_DIR = os.path.join(BASE_DIR, "mentett_modellek")
+    LOG_DIR = os.path.join(BASE_DIR, "logok")
     MODEL_PATH = os.path.join(CHECKPOINT_DIR, "final_model.zip")
     
-    ## Mappa létrehozása, ha nem létezik a futtató gépén.
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(LOG_DIR, exist_ok=True)
     
     checkpoint_callback = CheckpointCallback(
         save_freq=5000, save_path=CHECKPOINT_DIR, name_prefix='v8'
@@ -439,10 +441,13 @@ if __name__ == "__main__":
         model = PPO.load(MODEL_PATH, env=env)
     else:
         print("Új tanulás indítása...")
-        policy_kwargs = dict(net_arch=[dict(pi=[64, 64], vf=[64, 64])])
+        policy_kwargs = dict(net_arch=dict(pi=[64, 64], vf=[64, 64]))
         model = PPO("MlpPolicy", env, policy_kwargs=policy_kwargs, verbose=1, 
                     learning_rate=0.001, ent_coef=0.1, clip_range=0.2, 
                     n_steps=1024, batch_size=64)
+
+    new_logger = configure(LOG_DIR, ["stdout", "csv"])
+    model.set_logger(new_logger)
 
     print("Tanítás megkezdése...")
     try:
@@ -452,7 +457,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n Tanítás megszakadt ({e}), utolsó állapot mentése...")
         model.save(os.path.join(CHECKPOINT_DIR, "interrupted_model"))
-
+        
 # #Tesztelő script.
 # if __name__ == "__main__":
     # env = MinesweeperEnv()
